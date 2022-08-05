@@ -91,41 +91,51 @@ fn action_use(templates_path: &PathBuf, argument: Option<String>) -> Result<(), 
             if let Ok(entry) = entry {
                 let rel_path = entry
                     .path()
-                    .strip_prefix(&template_path)?
+                    .strip_prefix(&template_path)
+                    .unwrap()
                     .as_os_str()
                     .to_str()
                     .unwrap()
                     .to_string();
                 if !rel_path.is_empty() {
-                    entries.push(rel_path);
+                    entries.push((rel_path, entry.path().to_owned()));
                 }
             }
         }
-        entries.sort_by(|e1, e2| e1.len().cmp(&e2.len()));
+        entries.sort_by(|e1, e2| e1.0.len().cmp(&e2.0.len()));
         let mut replacements = HashMap::new();
         for e in &entries {
-            for replacement in extract_replacements(e) {
+            for replacement in extract_replacements(&e.0) {
                 if !replacements.contains_key(replacement.as_str()) {
                     print!("{}: ", replacement);
                     let line: String = read!("{}\n");
                     replacements.insert(replacement, line);
-                    println!();
+                }
+            }
+            if e.1.is_file() {
+                for replacement in extract_replacements(&fs::read_to_string(&e.1).unwrap()) {
+                    if !replacements.contains_key(replacement.as_str()) {
+                        print!("{}: ", replacement);
+                        let line: String = read!("{}\n");
+                        replacements.insert(replacement, line);
+                    }
                 }
             }
         }
         for e in &entries {
-            let mut path = env::current_dir()?;
+            let mut path = env::current_dir().unwrap();
             let path_tmp =
-                Path::new(replace_replacements(e.as_str().to_string(), &replacements).as_str())
+                Path::new(replace_replacements(e.0.as_str().to_string(), &replacements).as_str())
                     .to_owned();
             if path_tmp.is_absolute() {
                 panic!("Something went wrong and template path was absolute");
             }
             path.push(path_tmp);
-            if path.is_dir() {
-                fs::create_dir(path)?;
+            if e.1.is_dir() {
+                fs::create_dir(path).unwrap();
             } else {
-                fs::
+                let file_content = fs::read_to_string(&e.1).unwrap();
+                fs::write(&path, replace_replacements(file_content, &replacements)).unwrap();
             }
         }
     } else {
@@ -134,7 +144,7 @@ fn action_use(templates_path: &PathBuf, argument: Option<String>) -> Result<(), 
     Ok(())
 }
 lazy_static! {
-    static ref REPLACEMENT_REGEX: Regex = Regex::new(r"§%{([\w_.]+)}").unwrap();
+    static ref REPLACEMENT_REGEX: Regex = Regex::new(r"§%\{([\w_.]+)\}").unwrap();
 }
 fn extract_replacements(input: &String) -> Vec<String> {
     REPLACEMENT_REGEX
