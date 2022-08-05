@@ -2,10 +2,14 @@ use lazy_static::lazy_static;
 use regex::Regex;
 use std::collections::HashMap;
 use std::error::Error;
+use std::fs::{File, OpenOptions};
+use std::io::{Read, Seek, Write};
 use std::path::{Path, PathBuf};
 use std::{env, fs};
 use text_io::read;
-use walkdir::WalkDir;
+use walkdir::{DirEntry, WalkDir};
+use zip::write::FileOptions;
+use zip::CompressionMethod;
 
 fn main() {
     let mut templates_path = env::current_dir().unwrap();
@@ -29,6 +33,7 @@ fn main() {
                 action_create(&templates_path, argument).unwrap();
             }
             "remove" => action_remove(&templates_path, argument).unwrap(),
+            "export" => action_export(&templates_path, argument).unwrap(),
             _ => show_usage(),
         }
     } else {
@@ -75,6 +80,28 @@ fn action_create(templates_path: &PathBuf, argument: Option<String>) -> Result<(
         opener::open(Path::new(&template_path))?;
     } else {
         println!("USAGE: template create <name>");
+    }
+    Ok(())
+}
+fn action_export(templates_path: &PathBuf, argument: Option<String>) -> Result<(), Box<dyn Error>> {
+    if let Some(argument) = argument {
+        let regex: Regex = Regex::new(argument.as_str())?;
+        let entries: Vec<PathBuf> = fs::read_dir(templates_path)?
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                e.metadata().unwrap().is_dir() && regex.is_match(e.file_name().to_str().unwrap())
+            })
+            .map(|e| e.path())
+            .collect();
+        fs::remove_file("export.zip").ok();
+        let file = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .open("export.zip")
+            .unwrap();
+        zip_dir(entries, templates_path, file, CompressionMethod::Deflated)?;
+    } else {
+        println!("USAGE: template export <regex>");
     }
     Ok(())
 }
@@ -168,6 +195,38 @@ fn show_usage() {
     println!("\ttemplate use <name>: Uses template");
     println!("\ttemplate create <name>: Creates template and opens its folder");
     println!("\ttemplate remove <name>: Removes template");
-    println!("\ttemplate export <file>: Exports template to zip");
+    println!("\ttemplate export <regex>: Exports template to zip");
     println!("\ttemplate imports <file>: Imports template from zip");
+}
+fn zip_dir(
+    it: Vec<PathBuf>,
+    prefix: &Path,
+    writer: File,
+    method: zip::CompressionMethod,
+) -> zip::result::ZipResult<()> {
+    let mut zip = zip::ZipWriter::new(writer);
+    let options = FileOptions::default()
+        .compression_method(method)
+        .unix_permissions(0o755);
+
+    let mut buffer = Vec::new();
+    for entry in it {
+        let path = entry;
+        let name = path.strip_prefix(Path::new(prefix)).unwrap();
+
+        if path.is_file() {
+            #[allow(deprecated)]
+            zip.start_file_from_path(name, options)?;
+            let mut f = File::open(path)?;
+
+            f.read_to_end(&mut buffer)?;
+            zip.write_all(&*buffer)?;
+            buffer.clear();
+        } else if !name.as_os_str().is_empty() {
+            #[allow(deprecated)]
+            zip.add_directory_from_path(name, options)?;
+        }
+    }
+    zip.finish()?;
+    Ok(())
 }
