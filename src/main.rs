@@ -39,6 +39,7 @@ fn main() {
             "remove" => action_remove(&templates_path, argument).unwrap(),
             "export" => action_export(&templates_path, argument).unwrap(),
             "import" => action_import(&templates_path, argument).unwrap(),
+            "import-web" => action_import_web(&templates_path, argument).unwrap(),
             _ => show_usage(),
         }
     } else {
@@ -114,32 +115,7 @@ fn action_import(templates_path: &PathBuf, argument: Option<String>) -> Result<(
     if let Some(argument) = argument {
         let file = File::open(&argument);
         if let Ok(file) = file {
-            let mut archive = zip::ZipArchive::new(file).unwrap();
-            for i in 0..archive.len() {
-                let mut path = templates_path.clone();
-                let mut file = archive.by_index(i).unwrap();
-                let outpath = match file.enclosed_name() {
-                    Some(path) => path.to_owned(),
-                    None => continue,
-                };
-                if outpath.parent().unwrap().parent().is_none() {
-                    let mut template_path = templates_path.clone();
-                    template_path.push(&outpath.file_name().unwrap().to_str().unwrap().to_owned());
-                    fs::remove_dir_all(template_path).ok();
-                }
-                path.push(outpath);
-                if (*file.name()).ends_with('/') {
-                    fs::create_dir_all(&path).unwrap();
-                } else {
-                    if let Some(p) = path.parent() {
-                        if !p.exists() {
-                            fs::create_dir_all(&p).unwrap();
-                        }
-                    }
-                    let mut outfile = File::create(&path).unwrap();
-                    io::copy(&mut file, &mut outfile).unwrap();
-                }
-            }
+            import_file(templates_path, file);
         } else {
             println!("Archive not found");
         }
@@ -147,6 +123,49 @@ fn action_import(templates_path: &PathBuf, argument: Option<String>) -> Result<(
         println!("USAGE: template export <file>");
     }
     Ok(())
+}
+fn action_import_web(
+    templates_path: &PathBuf,
+    argument: Option<String>,
+) -> Result<(), Box<dyn Error>> {
+    if let Some(argument) = argument {
+        let mut resp = reqwest::blocking::get(argument).expect("download request failed");
+        let mut file = File::create(".tmp_template_archive.zip").expect("failed to create file");
+        io::copy(&mut resp, &mut file).expect("failed to copy content");
+        import_file(templates_path, &file);
+        fs::remove_file(".tmp_template_archive.zip").expect("Tmp file deletion failed");
+    } else {
+        println!("USAGE: template export <file>");
+    }
+    Ok(())
+}
+fn import_file(templates_path: &PathBuf, file: &File) {
+    let mut archive = zip::ZipArchive::new(file).unwrap();
+    for i in 0..archive.len() {
+        let mut path = templates_path.clone();
+        let mut file = archive.by_index(i).unwrap();
+        let outpath = match file.enclosed_name() {
+            Some(path) => path.to_owned(),
+            None => continue,
+        };
+        if outpath.parent().unwrap().parent().is_none() {
+            let mut template_path = templates_path.clone();
+            template_path.push(&outpath.file_name().unwrap().to_str().unwrap().to_owned());
+            fs::remove_dir_all(template_path).ok();
+        }
+        path.push(outpath);
+        if (*file.name()).ends_with('/') {
+            fs::create_dir_all(&path).unwrap();
+        } else {
+            if let Some(p) = path.parent() {
+                if !p.exists() {
+                    fs::create_dir_all(&p).unwrap();
+                }
+            }
+            let mut outfile = File::create(&path).unwrap();
+            io::copy(&mut file, &mut outfile).unwrap();
+        }
+    }
 }
 fn action_use(templates_path: &PathBuf, argument: Option<String>) -> Result<(), Box<dyn Error>> {
     if let Some(argument) = argument {
