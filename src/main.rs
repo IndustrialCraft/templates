@@ -17,7 +17,6 @@ fn main() {
         .unwrap()
         .data_dir()
         .to_owned();
-    templates_path.push(".templates");
     fs::create_dir(&templates_path).ok();
 
     let mut args = env::args();
@@ -115,7 +114,7 @@ fn action_import(templates_path: &PathBuf, argument: Option<String>) -> Result<(
     if let Some(argument) = argument {
         let file = File::open(&argument);
         if let Ok(file) = file {
-            import_file(templates_path, file);
+            import_file(templates_path, &file);
         } else {
             println!("Archive not found");
         }
