@@ -1,3 +1,4 @@
+use directories::ProjectDirs;
 use lazy_static::lazy_static;
 use regex::Regex;
 use std::collections::HashMap;
@@ -12,7 +13,10 @@ use zip::write::FileOptions;
 use zip::CompressionMethod;
 
 fn main() {
-    let mut templates_path = env::current_dir().unwrap();
+    let mut templates_path = ProjectDirs::from("", "IndustrialCraft", "Templates")
+        .unwrap()
+        .data_dir()
+        .to_owned();
     templates_path.push(".templates");
     fs::create_dir(&templates_path).ok();
 
