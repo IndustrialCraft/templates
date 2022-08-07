@@ -13,11 +13,13 @@ use zip::write::FileOptions;
 use zip::CompressionMethod;
 
 fn main() {
-    let mut templates_path = ProjectDirs::from("", "IndustrialCraft", "Templates")
-        .unwrap()
+    let templates_path = ProjectDirs::from("", "IndustrialCraft", "Templates")
+        .expect("app directory couldnt be found")
         .data_dir()
         .to_owned();
-    fs::create_dir(&templates_path).ok();
+    if !templates_path.exists() {
+        fs::create_dir(&templates_path).expect("error creating project directory");
+    }
 
     let mut args = env::args();
     let action = args.nth(1);
@@ -129,8 +131,12 @@ fn action_import_web(
 ) -> Result<(), Box<dyn Error>> {
     if let Some(argument) = argument {
         let mut resp = reqwest::blocking::get(argument).expect("download request failed");
-        let mut file = File::create(".tmp_template_archive.zip").expect("failed to create file");
-        io::copy(&mut resp, &mut file).expect("failed to copy content");
+        {
+            let mut file =
+                File::create(".tmp_template_archive.zip").expect("failed to create file");
+            io::copy(&mut resp, &mut file).expect("failed to copy content");
+        }
+        let file = File::open(".tmp_template_archive.zip").expect("Couldnt open tmp file");
         import_file(templates_path, &file);
         fs::remove_file(".tmp_template_archive.zip").expect("Tmp file deletion failed");
     } else {
