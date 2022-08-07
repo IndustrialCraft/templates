@@ -118,6 +118,11 @@ fn action_import(templates_path: &PathBuf, argument: Option<String>) -> Result<(
                     Some(path) => path.to_owned(),
                     None => continue,
                 };
+                if outpath.parent().unwrap().parent().is_none() {
+                    let mut template_path = templates_path.clone();
+                    template_path.push(&outpath.file_name().unwrap().to_str().unwrap().to_owned());
+                    fs::remove_dir_all(template_path).ok();
+                }
                 path.push(outpath);
                 if (*file.name()).ends_with('/') {
                     fs::create_dir_all(&path).unwrap();
