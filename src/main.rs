@@ -3,11 +3,11 @@ use regex::Regex;
 use std::collections::HashMap;
 use std::error::Error;
 use std::fs::{File, OpenOptions};
-use std::io::{Read, Seek, Write};
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::{env, fs};
+use std::{env, fs, io};
 use text_io::read;
-use walkdir::{DirEntry, WalkDir};
+use walkdir::WalkDir;
 use zip::write::FileOptions;
 use zip::CompressionMethod;
 
@@ -34,6 +34,7 @@ fn main() {
             }
             "remove" => action_remove(&templates_path, argument).unwrap(),
             "export" => action_export(&templates_path, argument).unwrap(),
+            "import" => action_import(&templates_path, argument).unwrap(),
             _ => show_usage(),
         }
     } else {
@@ -102,6 +103,39 @@ fn action_export(templates_path: &PathBuf, argument: Option<String>) -> Result<(
         zip_dir(entries, templates_path, file, CompressionMethod::Deflated)?;
     } else {
         println!("USAGE: template export <regex>");
+    }
+    Ok(())
+}
+fn action_import(templates_path: &PathBuf, argument: Option<String>) -> Result<(), Box<dyn Error>> {
+    if let Some(argument) = argument {
+        let file = File::open(&argument);
+        if let Ok(file) = file {
+            let mut archive = zip::ZipArchive::new(file).unwrap();
+            for i in 0..archive.len() {
+                let mut path = templates_path.clone();
+                let mut file = archive.by_index(i).unwrap();
+                let outpath = match file.enclosed_name() {
+                    Some(path) => path.to_owned(),
+                    None => continue,
+                };
+                path.push(outpath);
+                if (*file.name()).ends_with('/') {
+                    fs::create_dir_all(&path).unwrap();
+                } else {
+                    if let Some(p) = path.parent() {
+                        if !p.exists() {
+                            fs::create_dir_all(&p).unwrap();
+                        }
+                    }
+                    let mut outfile = File::create(&path).unwrap();
+                    io::copy(&mut file, &mut outfile).unwrap();
+                }
+            }
+        } else {
+            println!("Archive not found");
+        }
+    } else {
+        println!("USAGE: template export <file>");
     }
     Ok(())
 }
@@ -196,13 +230,13 @@ fn show_usage() {
     println!("\ttemplate create <name>: Creates template and opens its folder");
     println!("\ttemplate remove <name>: Removes template");
     println!("\ttemplate export <regex>: Exports template to zip");
-    println!("\ttemplate imports <file>: Imports template from zip");
+    println!("\ttemplate import <file>: Imports template from zip");
 }
 fn zip_dir(
     it: Vec<PathBuf>,
     prefix: &Path,
     writer: File,
-    method: zip::CompressionMethod,
+    method: CompressionMethod,
 ) -> zip::result::ZipResult<()> {
     let mut zip = zip::ZipWriter::new(writer);
     let options = FileOptions::default()
@@ -210,21 +244,27 @@ fn zip_dir(
         .unix_permissions(0o755);
 
     let mut buffer = Vec::new();
-    for entry in it {
-        let path = entry;
-        let name = path.strip_prefix(Path::new(prefix)).unwrap();
+    for entry_dir in it {
+        for entry in WalkDir::new(entry_dir)
+            .into_iter()
+            .filter_map(|e| e.ok())
+            .map(|e| e.path().to_owned())
+        {
+            let path = entry;
+            let name = path.strip_prefix(Path::new(prefix)).unwrap();
 
-        if path.is_file() {
-            #[allow(deprecated)]
-            zip.start_file_from_path(name, options)?;
-            let mut f = File::open(path)?;
+            if path.is_file() {
+                #[allow(deprecated)]
+                zip.start_file_from_path(name, options)?;
+                let mut f = File::open(path)?;
 
-            f.read_to_end(&mut buffer)?;
-            zip.write_all(&*buffer)?;
-            buffer.clear();
-        } else if !name.as_os_str().is_empty() {
-            #[allow(deprecated)]
-            zip.add_directory_from_path(name, options)?;
+                f.read_to_end(&mut buffer)?;
+                zip.write_all(&*buffer)?;
+                buffer.clear();
+            } else if !name.as_os_str().is_empty() {
+                #[allow(deprecated)]
+                zip.add_directory_from_path(name, options)?;
+            }
         }
     }
     zip.finish()?;
